@@ -109,7 +109,7 @@ def parse_match_rows(browser: RoboBrowser, community, matchday = None):
         gasttipp = row[3].find(
             'input', id=lambda x: x and x.endswith('_gastTipp'))
         try:
-            odds=[odd.replace(" ","") for odd in row[4].get_text().split("/")]
+            odds=[odd.replace(" ","").replace("Quote:", "") for odd in row[4].get_text().split("/")]
             match = Match(row[1].get_text(), row[2].get_text(), row[0].get_text(
             ), odds[0], odds[1], odds[2])
         except:
@@ -154,7 +154,7 @@ def get_communities(browser: RoboBrowser, desired_communities: list):
 
     def is_community(link):
         hreftext = gethreftext(link)
-        if hreftext == link.get_text():
+        if hreftext == link.get_text().lower().replace(" ", "-"):
             return True
         else:
             linkdiv = link.find('div', {'class': "menu-title-mit-tippglocke"})
@@ -185,6 +185,8 @@ def place_bets(browser: RoboBrowser, communities: list, predictor, override=Fals
             input_hometeam_value = submitform[field_hometeam.attrs['name']].value
             input_roadteam_value = submitform[field_roadteam.attrs['name']].value
             if not override and (input_hometeam_value or input_roadteam_value):
+                homebet, roadbet = predictor.predict(match)
+                print("{0} - betting {1}:{2}".format(match, homebet, roadbet))
                 print("{0} - skipped, already placed {1}:{2}".format(match,
                                                                      input_hometeam_value, input_roadteam_value))
                 continue
@@ -256,7 +258,9 @@ def main(arguments):
     browser.session.cookies['login'] = token
 
     # Which communities are considered, fail if no were found
-    communities = get_communities(browser, communities)
+    if not communities:
+        communities = get_communities(browser, communities)
+
     if(len(communities) == 0):
         exit("No community found!?")
 
