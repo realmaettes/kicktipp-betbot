@@ -109,7 +109,7 @@ def parse_match_rows(browser: RoboBrowser, community, matchday = None):
         gasttipp = row[3].find(
             'input', id=lambda x: x and x.endswith('_gastTipp'))
         try:
-            odds=[odd.replace(" ","") for odd in row[4].get_text().split("/")]
+            odds=[odd.replace(" ","").replace("Quote:", "") for odd in row[4].get_text().split("/")]
             match = Match(row[1].get_text(), row[2].get_text(), row[0].get_text(
             ), odds[0], odds[1], odds[2])
         except:
@@ -154,7 +154,7 @@ def get_communities(browser: RoboBrowser, desired_communities: list):
 
     def is_community(link):
         hreftext = gethreftext(link)
-        if hreftext == link.get_text():
+        if hreftext == link.get_text().lower().replace(" ", "-"):
             return True
         else:
             linkdiv = link.find('div', {'class': "menu-title-mit-tippglocke"})
@@ -170,6 +170,108 @@ def intersection(a, b):
     i = [x for x in a if x in b]
     return i
 
+def fetch_scoring_rules(community):
+    """Fetches scoring rules from the kicktipp page."""
+    browser = RoboBrowser(parser="html5lib")
+    url = f"{URL_BASE}/{community}/spielregeln"
+    browser.open(url)
+
+    scoring_table = None
+    min_max_table = None
+
+    try:
+        # Iterate through all tables on the page
+        for table in browser.find_all('table'):
+            rows = table.find_all('tr')
+            has_sieg_row = False
+            has_unentschieden_row = False
+            has_min_max_rows = False
+
+            # Check if it's the scoring rules table
+            for row in rows:
+                cells = row.find_all('td')
+                if cells and cells[0].get_text().strip() == 'Sieg':
+                    has_sieg_row = True
+                elif cells and cells[0].get_text().strip() == 'Unentschieden':
+                    has_unentschieden_row = True
+
+            if has_sieg_row and has_unentschieden_row:
+                scoring_table = table
+            
+            # Check if it's the MIN/MAX table
+            min_max_texts = ['Minimale Punktzahl', 'Maximale Punktzahl']
+            if any(text in row.get_text() for row in rows for text in min_max_texts):
+                 has_min_max_rows = True
+            
+            if has_min_max_rows:
+                 min_max_table = table
+
+        # Extract points from the scoring table if found
+        if scoring_table:
+            rows = scoring_table.find_all('tr')
+            win_row = None
+            draw_row = None
+
+            for row in rows:
+                cells = row.find_all('td')
+                if cells and cells[0].get_text().strip() == 'Sieg':
+                    win_row = row
+                elif cells and cells[0].get_text().strip() == 'Unentschieden':
+                    draw_row = row
+
+            if win_row and draw_row:
+                win_points_cells = win_row.find_all('td')
+                win_tendency_points = int(win_points_cells[1].get_text())
+                win_goal_difference_points = int(win_points_cells[2].get_text())
+                win_exact_score_points = int(win_points_cells[3].get_text())
+
+                draw_points_cells = draw_row.find_all('td')
+                draw_tendency_points = int(draw_points_cells[1].get_text())
+                draw_exact_score_points = int(draw_points_cells[3].get_text())
+            else:
+                raise ValueError("Could not find 'Sieg' or 'Unentschieden' rows in the identified scoring table.")
+        else:
+             # Set default scoring points if the table is not found
+            win_exact_score_points = 4
+            win_goal_difference_points = 3
+            win_tendency_points = 2
+            draw_exact_score_points = 4
+            draw_tendency_points = 2
+
+        # Extract MIN and MAX from the second table if found
+        if min_max_table:
+            rows = min_max_table.find_all('tr')
+            min_points = 0
+            max_points = 0
+            for row in rows:
+                cells = row.find_all('td')
+                if cells and cells[0].get_text().strip() == 'Minimale Punktzahl':
+                    min_points = int(cells[1].get_text()) # Assuming value is in the second cell
+                elif cells and cells[0].get_text().strip() == 'Maximale Punktzahl':
+                    max_points = int(cells[1].get_text()) # Assuming value is in the second cell
+            min_points = min_points
+            max_points = max_points
+
+        else:
+            # Set MIN and MAX to 0 if the table is not found
+            min_points = 0
+            max_points = 0
+        
+        return win_exact_score_points, win_goal_difference_points, win_tendency_points, draw_exact_score_points, draw_tendency_points, min_points, max_points
+
+
+    except Exception as e:
+        print(f"Error fetching or parsing scoring rules or MIN/MAX table: {e}")
+        # Set default scoring points and MIN/MAX to 0 if any error occurs
+        win_exact_score_points = 4
+        win_goal_difference_points = 3
+        win_tendency_points = 2
+        draw_exact_score_points = 4
+        draw_tendency_points = 2
+        min_points = 0
+        max_points = 0
+        return win_exact_score_points, win_goal_difference_points, win_tendency_points, draw_exact_score_points, draw_tendency_points, min_points, max_points
+    # --- End of Parsing Logic ---
 
 def place_bets(browser: RoboBrowser, communities: list, predictor, override=False, deadline=None, dryrun=False, matchday=None):
     """Place bets on all given communities."""
@@ -177,26 +279,33 @@ def place_bets(browser: RoboBrowser, communities: list, predictor, override=Fals
         print("Community: {0}".format(com))
         matches = parse_match_rows(browser, com, matchday)
         submitform = browser.get_form()
+        win_exact_score_points, win_goal_difference_points, win_tendency_points, draw_exact_score_points, draw_tendency_points, min_points, max_points = fetch_scoring_rules(com)
         for field_hometeam, field_roadteam, match in matches:
             if not field_hometeam or not field_roadteam:
+                homebet, roadbet = predictor.predict(match, win_exact_score_points, win_goal_difference_points, win_tendency_points, draw_exact_score_points, draw_tendency_points, min_points, max_points)
+                print("{0} - betting {1}:{2}".format(match, homebet, roadbet))
                 print("{0} - no bets possible".format(match))
                 continue
 
             input_hometeam_value = submitform[field_hometeam.attrs['name']].value
             input_roadteam_value = submitform[field_roadteam.attrs['name']].value
             if not override and (input_hometeam_value or input_roadteam_value):
+                homebet, roadbet = predictor.predict(match, win_exact_score_points, win_goal_difference_points, win_tendency_points, draw_exact_score_points, draw_tendency_points, min_points, max_points)
+                print("{0} - betting {1}:{2}".format(match, homebet, roadbet))
                 print("{0} - skipped, already placed {1}:{2}".format(match,
                                                                      input_hometeam_value, input_roadteam_value))
                 continue
 
             if deadline is not None:
                 if not is_before_dealine(deadline, match.match_date):
+                    homebet, roadbet = predictor.predict(match, win_exact_score_points, win_goal_difference_points, win_tendency_points, draw_exact_score_points, draw_tendency_points, min_points, max_points)
+                    print("{0} - betting {1}:{2}".format(match, homebet, roadbet))
                     time_to_match = match.match_date - datetime.datetime.now()
                     print("{0} - not betting yet, due in {1}".format(match,
                                                                      timedelta_tostring(time_to_match)))
                     continue
 
-            homebet, roadbet = predictor.predict(match)
+            homebet, roadbet = predictor.predict(match, win_exact_score_points, win_goal_difference_points, win_tendency_points, draw_exact_score_points, draw_tendency_points, min_points, max_points)
             print("{0} - betting {1}:{2}".format(match, homebet, roadbet))
             submitform[field_hometeam.attrs['name']] = str(homebet)
             submitform[field_roadteam.attrs['name']] = str(roadbet)
@@ -256,7 +365,9 @@ def main(arguments):
     browser.session.cookies['login'] = token
 
     # Which communities are considered, fail if no were found
-    communities = get_communities(browser, communities)
+    if not communities:
+        communities = get_communities(browser, communities)
+
     if(len(communities) == 0):
         exit("No community found!?")
 
