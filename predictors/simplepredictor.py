@@ -10,7 +10,7 @@ class SimplePredictor(PredictorBase):
     DOMINATION_THRESHOLD = 6
     DRAW_THRESHOLD = 1.2
 
-    def predict(self, match: Match):
+    def predict(self, match: Match, win_exact_score_points, win_goal_difference_points, win_tendency_points, draw_exact_score_points, draw_tendency_points, quote_points):
 
         diff = math.fabs(match.rate_home - match.rate_road)
         home_wins = match.rate_home < match.rate_road
