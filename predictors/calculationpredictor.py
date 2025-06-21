@@ -12,7 +12,7 @@ class CalculationPredictor(PredictorBase):
     DRAW_THRESHOLD = 1.3
     NONLINEARITY = 0.5
 
-    def predict(self, match: Match):
+    def predict(self, match: Match, win_exact_score_points, win_goal_difference_points, win_tendency_points, draw_exact_score_points, draw_tendency_points, quote_points):
 
         difference = math.fabs(match.rate_home - match.rate_road)
 
